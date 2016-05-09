@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/itsabot/abot/shared/datatypes"
 	"github.com/itsabot/abot/shared/language"
@@ -16,36 +14,25 @@ import (
 	"github.com/itsabot/abot/shared/plugin"
 )
 
-type weatherJSON struct {
-	Description []string
-	Temp        float64
-	Humidity    int
-}
-
 var p *dt.Plugin
 
 func init() {
-	rand.Seed(time.Now().UnixNano())
-	trigger := &nlp.StructuredInput{
-		Commands: []string{"what", "show", "tell", "is", "how"},
-		Objects: []string{"weather", "temperature", "temp", "outside",
-			"raining"},
-	}
 	var err error
-	p, err = plugin.New("github.com/itsabot/plugin_weather", trigger)
+	p, err = plugin.New("github.com/itsabot/plugin_weather")
 	if err != nil {
 		log.Fatal(err)
 	}
-	p.Vocab = dt.NewVocab(
-		dt.VocabHandler{
+	p.Keywords = plugin.NewKeywords(p,
+		dt.KeywordHandler{
 			Fn: kwGetTemp,
 			Trigger: &nlp.StructuredInput{
-				Commands: []string{"what", "show", "tell", "how"},
+				Commands: []string{"what", "show", "tell",
+					"how"},
 				Objects: []string{"weather", "temperature",
 					"temp", "outside"},
 			},
 		},
-		dt.VocabHandler{
+		dt.KeywordHandler{
 			Fn: kwGetRaining,
 			Trigger: &nlp.StructuredInput{
 				Commands: []string{"tell", "is"},
@@ -53,30 +40,21 @@ func init() {
 			},
 		},
 	)
-	p.SM.SetStates([]dt.State{
+	p.States = plugin.NewStates(p, []dt.State{
 		dt.State{
 			OnEntry: func(in *dt.Msg) string {
-				if !p.SM.HasMemory(in, "city") {
-					return "What city are you in?"
-				}
-				mem := p.SM.GetMemory(in, "city")
-				p.Log.Debug(mem)
-				city := &dt.City{}
-				if err := json.Unmarshal(mem.Val, city); err != nil {
-					p.Log.Info("failed to unmarshal memory.", err)
-					return ""
-				}
-				return fmt.Sprintf("Are you still in %s?", city.Name)
+				return "What city are you in?"
 			},
 			OnInput: func(in *dt.Msg) {
 				cities, _ := language.ExtractCities(p.DB, in)
 				if len(cities) > 0 {
-					p.SM.SetMemory(in, "city", cities[0])
+					p.SetMemory(in, "city", cities[0])
 				}
 			},
 			Complete: func(in *dt.Msg) (bool, string) {
-				return p.SM.HasMemory(in, "city"), ""
+				return p.HasMemory(in, "city"), ""
 			},
+			SkipIfComplete: true,
 		},
 		dt.State{
 			OnEntry: func(in *dt.Msg) string {
@@ -88,6 +66,9 @@ func init() {
 			},
 		},
 	})
+	if err = plugin.Register(p); err != nil {
+		p.Log.Fatal(err)
+	}
 }
 
 func kwGetTemp(in *dt.Msg) (resp string) {
@@ -99,7 +80,7 @@ func kwGetTemp(in *dt.Msg) (resp string) {
 		p.Log.Info("failed to getCity.", err)
 		return ""
 	}
-	p.SM.SetMemory(in, "city", city)
+	p.SetMemory(in, "city", city)
 	return getWeather(city)
 }
 
@@ -131,8 +112,8 @@ func getCity(in *dt.Msg) (*dt.City, error) {
 	if len(cities) >= 1 {
 		return &cities[0], nil
 	}
-	if p.SM.HasMemory(in, "city") {
-		mem := p.SM.GetMemory(in, "city")
+	if p.HasMemory(in, "city") {
+		mem := p.GetMemory(in, "city")
 		p.Log.Debug(mem)
 		city := &dt.City{}
 		if err := json.Unmarshal(mem.Val, city); err != nil {
@@ -146,7 +127,11 @@ func getCity(in *dt.Msg) (*dt.City, error) {
 
 func getWeather(city *dt.City) string {
 	p.Log.Debug("getting weather for city", city.Name)
-	req := weatherJSON{}
+	var req struct {
+		Description []string
+		Temp        float64
+		Humidity    int
+	}
 	n := url.QueryEscape(city.Name)
 	resp, err := http.Get("https://www.itsabot.org/api/weather/" + n)
 	if err != nil {
@@ -156,7 +141,6 @@ func getWeather(city *dt.City) string {
 	if err = json.NewDecoder(resp.Body).Decode(&req); err != nil {
 		return ""
 	}
-	p.Log.Debug("closing resp.Body")
 	if err = resp.Body.Close(); err != nil {
 		return ""
 	}
