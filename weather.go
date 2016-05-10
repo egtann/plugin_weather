@@ -40,7 +40,10 @@ func init() {
 			},
 		},
 	)
-	p.States = plugin.NewStates(p, []dt.State{
+	p.States = plugin.NewStates(p, dt.StateHolder{
+		// TODO ---
+		// Each state should be an interface, then I can pass in State
+		// or []State.
 		dt.State{
 			OnEntry: func(in *dt.Msg) string {
 				return "What city are you in?"
